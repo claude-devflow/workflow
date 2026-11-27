@@ -1,0 +1,364 @@
+# Claude駆動開発フローの共通ワークフロー。
+# 各アプリの呼び出し用ファイルから workflow_call で呼ばれる。
+# どのイベントに反応するかは route ジョブ（scripts/route.sh）が判定する。
+name: devflow
+
+on:
+  workflow_call:
+    inputs:
+      devflow_ref:
+        description: スクリプトとプロンプトを取得するref。呼び出し側の uses と同じタグ・ブランチを指定する
+        type: string
+        default: v1
+      devflow_repo:
+        description: 共通ワークフローのリポジトリ
+        type: string
+        default: claude-devflow/workflow
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+      DEVFLOW_ISSUE_TOKEN:
+        description: 共通ワークフローのリポジトリへ改善Issueを立てるためのfine-grained PAT
+        required: false
+
+jobs:
+  # イベントを判定する。Claudeは起動しない
+  route:
+    # botのコメント・レビューと、GITHUB_TOKENによるイベントはここで落とす
+    if: >-
+      github.event.sender.login != 'github-actions[bot]' &&
+      !(contains(fromJSON('["issue_comment","pull_request_review"]'), github.event_name) && github.event.sender.type == 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      actions: write
+    outputs:
+      config: ${{ steps.route.outputs.config }}
+      mention: ${{ steps.route.outputs.mention }}
+      reviewers: ${{ steps.route.outputs.reviewers }}
+      issue_action: ${{ steps.route.outputs.issue_action }}
+      issues: ${{ steps.route.outputs.issues }}
+      pr_action: ${{ steps.route.outputs.pr_action }}
+      prs: ${{ steps.route.outputs.prs }}
+      flaky_run: ${{ steps.route.outputs.flaky_run }}
+      run_id: ${{ steps.route.outputs.run_id }}
+      comment_id: ${{ steps.route.outputs.comment_id }}
+      review_id: ${{ steps.route.outputs.review_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.devflow_repo }}
+          ref: ${{ inputs.devflow_ref }}
+          sparse-checkout: scripts
+          persist-credentials: false
+      - id: route
+        run: bash scripts/route.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Issue上の作業：計画（best）と実装（sonnet）
+  issue:
+    needs: route
+    if: needs.route.outputs.issue_action != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(needs.route.outputs.issues) }}
+    concurrency:
+      group: devflow-issue-${{ matrix.issue }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    env:
+      CFG: ${{ needs.route.outputs.config }}
+      MENTION: ${{ needs.route.outputs.mention }}
+      ISSUE: ${{ matrix.issue }}
+      COMMENT_ID: ${{ needs.route.outputs.comment_id }}
+      DEVFLOW_REPO: ${{ inputs.devflow_repo }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.route.outputs.config).default_branch }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.devflow_repo }}
+          ref: ${{ inputs.devflow_ref }}
+          path: .devflow-src
+          persist-credentials: false
+      - name: 共通ワークフローの準備
+        run: |
+          mv .devflow-src "$RUNNER_TEMP/devflow"
+          bash "$RUNNER_TEMP/devflow/scripts/env.sh"
+
+      - name: 計画のプロンプト
+        id: plan_prompt
+        if: needs.route.outputs.issue_action == 'plan'
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" plan
+      - name: 計画
+        id: plan
+        if: needs.route.outputs.issue_action == 'plan'
+        uses: anthropics/claude-code-action@v1
+        env:
+          DEVFLOW_ISSUE_TOKEN: ${{ secrets.DEVFLOW_ISSUE_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.plan_prompt.outputs.text }}
+          claude_args: >-
+            ${{ env.ARGS_PLAN }}
+            --json-schema '{"type":"object","properties":{"decision":{"type":"string","enum":["implement","wait","stop"]},"comment":{"type":"string"}},"required":["decision","comment"]}'
+      - name: 計画を投稿
+        id: decision
+        if: needs.route.outputs.issue_action == 'plan'
+        env:
+          GH_TOKEN: ${{ steps.plan.outputs.github_token }}
+          RESULT: ${{ steps.plan.outputs.structured_output }}
+        run: |
+          jq -r '.comment + "\n\n<!-- devflow:plan -->"' <<<"$RESULT" > "$RUNNER_TEMP/plan.md"
+          gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/plan.md"
+          echo "decision=$(jq -r .decision <<<"$RESULT")" >> "$GITHUB_OUTPUT"
+
+      - name: 実装済みか確認
+        id: guard
+        if: needs.route.outputs.issue_action == 'implement' || steps.decision.outputs.decision == 'implement'
+        run: |
+          pr=$(gh pr list --state all --limit 100 --json number,headRefName,state \
+            --jq ".[] | select(.state != \"CLOSED\" and (.headRefName | startswith(\"claude/issue-$ISSUE-\"))) | .number" | head -n1)
+          if [ -n "$pr" ]; then
+            echo "#$ISSUE にはPR #$pr があるため実装しない"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: 実装のプロンプト
+        id: impl_prompt
+        if: steps.guard.outputs.go == 'true'
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" implement
+      - name: 実装
+        if: steps.guard.outputs.go == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          DEVFLOW_ISSUE_TOKEN: ${{ secrets.DEVFLOW_ISSUE_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.impl_prompt.outputs.text }}
+          claude_args: ${{ env.ARGS_IMPLEMENT }}
+
+  # PR上の作業：CIの自動修正、セルフレビュー、レビュー対応、コメント対応、コンフリクト解消
+  pr:
+    needs: route
+    if: needs.route.outputs.pr_action != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.route.outputs.prs) }}
+    concurrency:
+      group: devflow-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
+      id-token: write
+    env:
+      CFG: ${{ needs.route.outputs.config }}
+      MENTION: ${{ needs.route.outputs.mention }}
+      REVIEWERS: ${{ needs.route.outputs.reviewers }}
+      ACTION: ${{ needs.route.outputs.pr_action }}
+      PR: ${{ matrix.pr }}
+      COMMENT_ID: ${{ needs.route.outputs.comment_id }}
+      REVIEW_ID: ${{ needs.route.outputs.review_id }}
+      RUN_ID: ${{ needs.route.outputs.run_id }}
+      DEVFLOW_REPO: ${{ inputs.devflow_repo }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: PRのブランチを取得
+        id: head
+        run: |
+          echo "ref=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.head.outputs.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.devflow_repo }}
+          ref: ${{ inputs.devflow_ref }}
+          path: .devflow-src
+          persist-credentials: false
+      - name: 共通ワークフローの準備
+        run: |
+          mv .devflow-src "$RUNNER_TEMP/devflow"
+          bash "$RUNNER_TEMP/devflow/scripts/env.sh"
+
+      # CIの自動修正：Haikuがログを要約し、Sonnetが直す
+      - name: CIの失敗ログを取得
+        if: env.ACTION == 'ci_fix'
+        run: |
+          gh run view "$RUN_ID" --log-failed | tail -n 3000 > "$RUNNER_TEMP/ci-failed.log" || true
+          echo "CI_LOG=$RUNNER_TEMP/ci-failed.log" >> "$GITHUB_ENV"
+      - name: 要約のプロンプト
+        id: summary_prompt
+        if: env.ACTION == 'ci_fix'
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" ci_summary
+      - name: CIログの要約
+        id: summary
+        if: env.ACTION == 'ci_fix'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.summary_prompt.outputs.text }}
+          claude_args: >-
+            ${{ env.ARGS_LIGHT }}
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}'
+      - name: 要約を渡す
+        if: env.ACTION == 'ci_fix'
+        env:
+          RESULT: ${{ steps.summary.outputs.structured_output }}
+        run: |
+          printf '%s' "$RESULT" | jq -r '.summary // ""' > "$RUNNER_TEMP/ci-summary.md" || true
+          echo "CI_SUMMARY_FILE=$RUNNER_TEMP/ci-summary.md" >> "$GITHUB_ENV"
+
+      # セルフレビュー：Opusが1回だけレビューする
+      - name: セルフレビューのプロンプト
+        id: review_prompt
+        if: env.ACTION == 'self_review'
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" self_review
+      - name: セルフレビュー
+        id: review
+        if: env.ACTION == 'self_review'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.review_prompt.outputs.text }}
+          claude_args: >-
+            ${{ env.ARGS_REVIEW }}
+            --json-schema '{"type":"object","properties":{"has_findings":{"type":"boolean"},"review":{"type":"string"}},"required":["has_findings","review"]}'
+      - name: セルフレビューを投稿
+        id: review_result
+        if: env.ACTION == 'self_review'
+        env:
+          GH_TOKEN: ${{ steps.review.outputs.github_token }}
+          RESULT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          jq -r '"## セルフレビュー（Opus）\n\n" + .review + "\n\n<!-- devflow:self-review -->"' <<<"$RESULT" > "$RUNNER_TEMP/review.md"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/review.md"
+          echo "has_findings=$(jq -r .has_findings <<<"$RESULT")" >> "$GITHUB_OUTPUT"
+      - name: レビュー可能にする
+        if: env.ACTION == 'self_review' && steps.review_result.outputs.has_findings == 'false'
+        env:
+          GH_TOKEN: ${{ steps.review.outputs.github_token }}
+        run: |
+          gh pr ready "$PR"
+          if [ -n "$REVIEWERS" ]; then gh pr edit "$PR" --add-reviewer "$REVIEWERS"; fi
+
+      # Sonnetによる修正
+      - name: 修正のプロンプト
+        id: work_prompt
+        if: env.ACTION != 'self_review' || steps.review_result.outputs.has_findings == 'true'
+        run: |
+          name="$ACTION"
+          if [ "$ACTION" = self_review ]; then name=self_review_fix; fi
+          bash "$DEVFLOW_DIR/scripts/prompt.sh" "$name"
+      - name: 修正
+        if: steps.work_prompt.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        env:
+          DEVFLOW_ISSUE_TOKEN: ${{ secrets.DEVFLOW_ISSUE_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.work_prompt.outputs.text }}
+          claude_args: ${{ env.ARGS_IMPLEMENT }}
+
+  # flaky testの起票：検出はroute、原因の分析はHaiku
+  flaky:
+    needs: route
+    if: needs.route.outputs.flaky_run != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+      id-token: write
+    env:
+      CFG: ${{ needs.route.outputs.config }}
+      MENTION: ${{ needs.route.outputs.mention }}
+      RUN_ID: ${{ needs.route.outputs.flaky_run }}
+      DEVFLOW_REPO: ${{ inputs.devflow_repo }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJSON(needs.route.outputs.config).default_branch }}
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.devflow_repo }}
+          ref: ${{ inputs.devflow_ref }}
+          path: .devflow-src
+          persist-credentials: false
+      - name: 共通ワークフローの準備
+        run: |
+          mv .devflow-src "$RUNNER_TEMP/devflow"
+          bash "$RUNNER_TEMP/devflow/scripts/env.sh"
+      - name: 1回目の失敗ログを取得
+        run: |
+          gh run view "$RUN_ID" --attempt 1 --log-failed | tail -n 3000 > "$RUNNER_TEMP/ci-failed.log" || true
+          echo "CI_LOG=$RUNNER_TEMP/ci-failed.log" >> "$GITHUB_ENV"
+      - name: 分析のプロンプト
+        id: flaky_prompt
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" flaky
+      - name: 原因の分析
+        id: analyze
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.flaky_prompt.outputs.text }}
+          claude_args: >-
+            ${{ env.ARGS_LIGHT }}
+            --json-schema '{"type":"object","properties":{"test_name":{"type":"string"},"analysis":{"type":"string"}},"required":["test_name","analysis"]}'
+      - name: 起票または発生回数の追記
+        env:
+          GH_TOKEN: ${{ steps.analyze.outputs.github_token }}
+          RESULT: ${{ steps.analyze.outputs.structured_output }}
+        run: bash "$DEVFLOW_DIR/scripts/flaky-issue.sh"
+
+  # Claudeのジョブが失敗したら承認者に知らせる（利用上限に達した場合など）
+  notify:
+    needs: [route, issue, pr, flaky]
+    if: failure() && needs.route.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MENTION: ${{ needs.route.outputs.mention }}
+      TARGETS: ${{ needs.route.outputs.issues }} ${{ needs.route.outputs.prs }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - run: |
+          body="$MENTION Claudeの実行が失敗しました。Maxの利用上限に達した可能性があります。上限が戻ったら、[ワークフローの実行]($RUN_URL) の「Re-run failed jobs」で再実行してください。
+
+          <!-- devflow:failure -->"
+          for n in $(jq -rn --argjson a "$(jq -cs 'add' <<<"$TARGETS")" '$a | unique | .[]'); do
+            gh issue comment "$n" -R "$GITHUB_REPOSITORY" --body "$body"
+          done

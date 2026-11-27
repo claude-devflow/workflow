@@ -1,0 +1,3 @@
+# 共通ワークフロー自身の設定。organizationのリポジトリなので承認者を指定する
+default_branch: main
+approvers: [makibishu]

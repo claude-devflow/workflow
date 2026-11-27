@@ -1,0 +1,32 @@
+# Claude駆動開発フローの呼び出し用ファイル。
+# 関係しそうなイベントを広めに受け取り、共通ワークフローを呼ぶだけ。反応するかどうかは共通ワークフロー側で判定する。
+# 共通ワークフロー自身も同じフローで改善する。配る前の版を使わないよう main を呼ぶ。
+name: claude
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  id-token: write
+
+jobs:
+  devflow:
+    uses: claude-devflow/workflow/.github/workflows/devflow.yml@main
+    with:
+      devflow_ref: main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
