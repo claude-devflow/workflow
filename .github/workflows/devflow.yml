@@ -122,7 +122,6 @@ jobs:
         id: decision
         if: needs.route.outputs.issue_action == 'plan'
         env:
-          GH_TOKEN: ${{ steps.plan.outputs.github_token }}
           RESULT: ${{ steps.plan.outputs.structured_output }}
         run: |
           jq -r '.comment + "\n\n<!-- devflow:plan -->"' <<<"$RESULT" > "$RUNNER_TEMP/plan.md"
@@ -254,7 +253,6 @@ jobs:
         id: review_result
         if: env.ACTION == 'self_review'
         env:
-          GH_TOKEN: ${{ steps.review.outputs.github_token }}
           RESULT: ${{ steps.review.outputs.structured_output }}
         run: |
           jq -r '"## セルフレビュー（Opus）\n\n" + .review + "\n\n<!-- devflow:self-review -->"' <<<"$RESULT" > "$RUNNER_TEMP/review.md"
@@ -262,8 +260,6 @@ jobs:
           echo "has_findings=$(jq -r .has_findings <<<"$RESULT")" >> "$GITHUB_OUTPUT"
       - name: レビュー可能にする
         if: env.ACTION == 'self_review' && steps.review_result.outputs.has_findings == 'false'
-        env:
-          GH_TOKEN: ${{ steps.review.outputs.github_token }}
         run: |
           gh pr ready "$PR"
           if [ -n "$REVIEWERS" ]; then gh pr edit "$PR" --add-reviewer "$REVIEWERS"; fi
@@ -325,21 +321,15 @@ jobs:
       - name: 分析のプロンプト
         id: flaky_prompt
         run: bash "$DEVFLOW_DIR/scripts/prompt.sh" flaky
-      - name: 原因の分析
-        id: analyze
+      # 起票はClaudeが起票したIssueとして扱うため、Claude自身が flaky-issue.sh で行う
+      # （actionのApp tokenは終了時に失効するので、後続のステップでは使えない）
+      - name: 原因の分析と起票
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
           prompt: ${{ steps.flaky_prompt.outputs.text }}
-          claude_args: >-
-            ${{ env.ARGS_LIGHT }}
-            --json-schema '{"type":"object","properties":{"test_name":{"type":"string"},"analysis":{"type":"string"}},"required":["test_name","analysis"]}'
-      - name: 起票または発生回数の追記
-        env:
-          GH_TOKEN: ${{ steps.analyze.outputs.github_token }}
-          RESULT: ${{ steps.analyze.outputs.structured_output }}
-        run: bash "$DEVFLOW_DIR/scripts/flaky-issue.sh"
+          claude_args: ${{ env.ARGS_LIGHT }}
 
   # Claudeのジョブが失敗したら承認者に知らせる（利用上限に達した場合など）
   notify:
