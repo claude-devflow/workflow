@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # flaky testのIssueを起票する。同じテストのIssueが開いていれば、発生回数を追記する。
-# 入力: RESULT（Haikuの分析結果のJSON）、RUN_ID、GH_TOKEN（Claude App のトークン）
+# Claudeが原因を分析したあとに実行する。Claude App のトークンで立てるので、Claudeが起票したIssueになる。
+# 使い方: flaky-issue.sh "<テスト名>" <分析を書いたファイル>
+# 入力: RUN_ID（1回目に失敗したCIの実行ID）
 set -euo pipefail
 
-test_name=$(jq -r .test_name <<<"$RESULT")
-analysis=$(jq -r .analysis <<<"$RESULT")
+test_name=${1:?テスト名が必要}
+analysis=$(cat "${2:?分析のファイルが必要}")
 title="flaky test: $test_name"
 run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
 marker='<!-- devflow:flaky-occurrence -->'
