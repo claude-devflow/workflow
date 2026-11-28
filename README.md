@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 | CIの完了（失敗） | `claude/` のブランチ | 1回目は失敗したジョブを再実行（flaky判定）。また落ちたら要約（`haiku`）→ 修正（`sonnet`）。承認者が最後に発言してから3回まで |
 | CIの完了（成功） | Draft PR | セルフレビュー前ならセルフレビュー（`opus`）、指摘があれば修正（`sonnet`）。セルフレビュー済みならReady化してレビュアーを指定 |
 | CIの再実行での成功 | | flaky testの分析（`haiku`）と起票・発生回数の追記 |
-| デフォルトブランチへのpush | | 閉じたIssueを待っていたサブIssueの計画、コンフリクトしたPRの解消（`sonnet`） |
+| デフォルトブランチへのPRのマージ | `pull_request` の `closed`（`push` は claude-code-action が非対応） | 閉じたIssueを待っていたサブIssueの計画、コンフリクトしたPRの解消（`sonnet`） |
 | いずれかの工程の失敗 | | 承認者をメンションして、Re-run failed jobs を案内 |
 
 ## 目印
