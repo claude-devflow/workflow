@@ -131,7 +131,7 @@ jobs:
           if [ -z "$triage" ]; then triage="{}"; fi
           plan=$(jq -r .models.plan <<<"$CFG")
           impl=$(jq -r .models.implement <<<"$CFG")
-          if [ "$plan" = auto ]; then plan=$(jq -r '.plan_model // ""' <<<"$triage"); fi
+          if [ "$plan" = auto ]; then plan=$(valid "$(jq -r '.plan_model // ""' <<<"$triage")" best); fi
           if [ "$impl" = auto ]; then
             if [ -n "${TRIAGE:-}" ]; then
               impl=$(jq -r '.implement_model // ""' <<<"$triage")
@@ -150,8 +150,8 @@ jobs:
             if [ "$(rank "$impl")" -gt "$(rank "$max")" ]; then impl=$max; fi
           fi
           {
-            echo "plan=$(valid "$plan" best)"
-            echo "implement=$(valid "$impl" sonnet)"
+            echo "plan=$plan"
+            echo "implement=$impl"
             echo "reason=$(jq -r '.reason // ""' <<<"$triage" | tr '\n' ' ')"
           } >> "$GITHUB_OUTPUT"
 
@@ -174,7 +174,7 @@ jobs:
           claude_args: >-
             --model ${{ steps.models.outputs.plan }}
             ${{ env.ARGS_PLAN_BASE }}
-            --json-schema '{"type":"object","properties":{"decision":{"type":"string","enum":["implement","wait","stop","escalate"]},"comment":{"type":"string"}},"required":["decision","comment"]}'
+            --json-schema '{"type":"object","properties":{"decision":{"type":"string","enum":["implement","wait","stop"${{ contains(fromJSON('["haiku","sonnet"]'), steps.models.outputs.plan) && ',"escalate"' || '' }}]},"comment":{"type":"string"}},"required":["decision","comment"]}'
       # 軽いモデルが難しいと判断したら、Opusで計画をやり直す
       - name: 計画のやり直しのプロンプト
         id: replan_prompt
@@ -204,13 +204,14 @@ jobs:
           ESCALATED: ${{ steps.replan.outcome == 'success' }}
           PLAN_MODEL: ${{ steps.replan.outcome == 'success' && 'opus' || steps.models.outputs.plan }}
           IMPL_MODEL: ${{ steps.models.outputs.implement }}
+          IMPL_CFG: ${{ fromJSON(needs.route.outputs.config).models.implement }}
           REASON: ${{ steps.models.outputs.reason }}
         run: |
           decision=$(jq -r .decision <<<"$RESULT")
           impl=$IMPL_MODEL
           if [ "$ESCALATED" = true ]; then
-            # やり直したものは、実装も sonnet 以上にする
-            if [ "$impl" = haiku ]; then impl=sonnet; fi
+            # やり直したものは、実装も sonnet 以上にする（判定で選んだときだけ）
+            if [ "$IMPL_CFG" = auto ] && [ "$impl" = haiku ]; then impl=sonnet; fi
             REASON="${REASON:+$REASON }計画は難しいと判断され、Opusでやり直した。"
           fi
           note="<sub>モデル：計画 \`$PLAN_MODEL\` / 実装 \`$impl\`${REASON:+（$REASON）}</sub>"
