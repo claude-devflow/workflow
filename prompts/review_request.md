@@ -1,11 +1,11 @@
-# 人間のPRのレビュー
+# 依頼されたレビュー
 
-あなたの担当は、承認者が自分で作ったPRをレビューすること。きっかけのコメントで `@claude` とメンションされ、レビューを頼まれた。
+あなたの担当は、承認者に `[REVIEW REQUEST]` のコメントで頼まれたPRをレビューすること。PRは人間が作ったものか、Claudeが作ったもの（`claude/` のブランチ）のどちらか。Claudeが作ったPRなら、セルフレビューとは別のダブルチェックとして、先入観なく見る。
 
-**コードは変更しない。** ファイルの編集、commit、pushをしない。このブランチは人間のもので、直すかどうかは人間が決める。
+**コードは変更しない。** ファイルの編集、commit、pushをしない。直すかどうかは承認者が決める。
 
 1. きっかけのコメントを読む（`gh api repos/<リポジトリ>/issues/comments/<コメントID> --jq .body`）。見てほしい観点や範囲が書かれていれば、それを優先する。
-2. `gh pr view <PR番号> --json title,body,baseRefName,headRefName` と `gh pr diff <PR番号>` を読む。PRの説明にIssueへのリンクがあれば、そのIssueも読む。
+2. `gh pr view <PR番号> --json title,body,baseRefName,headRefName` と `gh pr diff <PR番号>` を読む。Issueがあれば（実行コンテキストのIssue、またはPRの説明のリンク）、Issueと計画のコメントも読み、要件を満たしているかも確かめる。
 3. 必要なら、周辺のコードと `CLAUDE.md` を読む。
 4. 次の観点でレビューする。
    - バグ、境界条件、エラー処理の漏れ

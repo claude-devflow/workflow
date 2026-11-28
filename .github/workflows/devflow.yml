@@ -266,7 +266,7 @@ jobs:
           gh pr ready "$PR"
           if [ -n "$REVIEWERS" ]; then gh pr edit "$PR" --add-reviewer "$REVIEWERS"; fi
 
-      # 人間のPRのレビュー：Opusがインラインコメントで返す。pushはしない
+      # [REVIEW REQUEST] で頼まれたレビュー：Opusがインラインコメントで返す。pushはしない
       - name: レビューのプロンプト
         id: request_prompt
         if: env.ACTION == 'review_request'

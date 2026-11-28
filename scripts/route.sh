@@ -62,15 +62,11 @@ load_config() {
 
 is_approver() { jq -e --arg u "$1" 'any(.[]; . == $u)' <<<"$APPROVERS" >/dev/null; }
 
-# 先頭の空白・改行を除いた本文の種類（lgtm / memo / normal）
+# 先頭の空白・改行を除いた本文の種類（lgtm / memo / review / normal）
 comment_kind() {
   jq -r "$1"' // "" | sub("^[[:space:]]+"; "") |
-    if startswith("[LGTM]") then "lgtm" elif startswith("[MEMO]") then "memo" else "normal" end' "$EVENT"
-}
-
-# 本文に @claude のメンションがあるか
-mentions_claude() {
-  jq -e "$1"' // "" | test("(^|[^A-Za-z0-9_/-])@claude($|[^A-Za-z0-9_-])"; "i")' "$EVENT" >/dev/null
+    if startswith("[LGTM]") then "lgtm" elif startswith("[MEMO]") then "memo"
+    elif startswith("[REVIEW REQUEST]") then "review" else "normal" end' "$EVENT"
 }
 
 # Issueに対応する、開いている・マージ済みのClaudeのPR
@@ -135,19 +131,20 @@ on_issue_comment() {
   if [ -n "$(ev .issue.pull_request.url)" ]; then
     # PR上の [LGTM] は承認として扱わない
     if [ "$kind" = lgtm ]; then return; fi
-    head=$(gh pr view "$n" -R "$REPO" --json headRefName -q .headRefName)
-    if [[ $head == claude/* ]]; then
-      pr_action=pr_comment
-    elif mentions_claude .comment.body; then
-      # 人間のPRは、@claude でメンションされたときだけレビューする（pushはしない）
+    if [ "$kind" = review ]; then
+      # [REVIEW REQUEST] はどのブランチのPRでもレビューする（pushはしない）
       pr_action=review_request
     else
-      return
+      head=$(gh pr view "$n" -R "$REPO" --json headRefName -q .headRefName)
+      if [[ $head != claude/* ]]; then return; fi
+      pr_action=pr_comment
     fi
     prs=$(to_json "$n")
     return
   fi
 
+  # Issue上の [REVIEW REQUEST] は対象外
+  if [ "$kind" = review ]; then return; fi
   if [ "$kind" = lgtm ]; then
     if [ -n "$(active_pr_for_issue "$n")" ]; then log "#$n はPRがあるため [LGTM] を無視"; return; fi
     issue_action=implement
