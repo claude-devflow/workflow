@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 
 | イベント | 条件 | 工程（モデル） |
 | --- | --- | --- |
-| Issueの作成 | 承認者かClaudeが起票。依存Issueが開いていない | 計画（`best`）→ 承認者のIssueか簡単なものは実装（`sonnet`） |
+| Issueの作成 | 承認者かClaudeが起票。依存Issueが開いていない | モデルの判定（`opus`）→ 計画（判定したモデル。難しければ `opus` でやり直し）→ 承認者のIssueか簡単なものは実装（判定したモデル） |
 | Issueへのコメント | 承認者の新規コメント。`[MEMO]` は無視 | `[LGTM]` なら実装、それ以外は計画のやり直し・返信 |
 | PRへのコメント | 承認者、`claude/` のブランチ。`[LGTM]`・`[MEMO]`・`[REVIEW REQUEST]` は無視 | コメント対応（`sonnet`） |
 | PRへのコメント（人間のPR） | 承認者、`claude/` 以外のブランチ、`@claude` のメンションあり | 返信（`sonnet`）。修正は `suggestion` で示すだけで、pushはしない |
@@ -42,6 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 | --- | --- |
 | ブランチ `claude/issue-<N>-...` | Issue #N の作業ブランチ。PRとIssueの対応づけに使う |
 | `<!-- devflow:plan -->` | 計画のコメント |
+| `<!-- devflow:model implement=<モデル> -->` | 計画で決めた実装のモデル。`[LGTM]` で実装するときに使う |
 | `<!-- devflow:self-review -->` | セルフレビュー済み（1回だけ行う） |
 | `<!-- devflow:ci-fix -->` | CIの自動修正の回数 |
 | `<!-- devflow:ci-limit -->` | 自動修正の上限に達した通知 |

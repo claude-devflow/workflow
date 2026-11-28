@@ -39,6 +39,13 @@ line() { if [ -n "$2" ]; then echo "- $1: $2"; fi; }
   line "共通ワークフローのディレクトリ" "$DEVFLOW_DIR"
   line "共通ワークフローのリポジトリ" "${DEVFLOW_REPO:-}"
   line "この実行で起票できるIssueの上限" "${DEVFLOW_ISSUE_LIMIT:-}"
+  line "計画のモデル" "${PLAN_MODEL:-}"
+  if [ -n "${ISSUE_DUMP:-}" ] && [ -s "$ISSUE_DUMP" ]; then
+    echo
+    echo "## Issueの本文とコメント"
+    echo
+    cat "$ISSUE_DUMP"
+  fi
   if [ -n "${CI_SUMMARY_FILE:-}" ] && [ -s "$CI_SUMMARY_FILE" ]; then
     echo
     echo "## CIの失敗の要約（Haiku）"

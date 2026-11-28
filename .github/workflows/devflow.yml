@@ -61,7 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Issue上の作業：計画（best）と実装（sonnet）
+  # Issue上の作業：モデルの判定（opus）、計画、実装
   issue:
     needs: route
     if: needs.route.outputs.issue_action != ''
@@ -103,9 +103,56 @@ jobs:
           mv .devflow-src "$RUNNER_TEMP/devflow"
           bash "$RUNNER_TEMP/devflow/scripts/env.sh"
 
+      # モデルの判定：models.plan / models.implement が auto のとき、OpusがIssueだけを読んで決める
+      - name: 判定のプロンプト
+        id: triage_prompt
+        if: needs.route.outputs.issue_action == 'plan' && (fromJSON(needs.route.outputs.config).models.plan == 'auto' || fromJSON(needs.route.outputs.config).models.implement == 'auto')
+        run: |
+          gh issue view "$ISSUE" --comments | head -c 30000 > "$RUNNER_TEMP/issue.md"
+          ISSUE_DUMP="$RUNNER_TEMP/issue.md" bash "$DEVFLOW_DIR/scripts/prompt.sh" triage
+      - name: モデルの判定
+        id: triage
+        if: steps.triage_prompt.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.triage_prompt.outputs.text }}
+          claude_args: >-
+            ${{ env.ARGS_TRIAGE }}
+            --json-schema '{"type":"object","properties":{"plan_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"implement_model":{"type":"string","enum":["opus","sonnet","haiku"]},"reason":{"type":"string"}},"required":["plan_model","implement_model","reason"]}'
+      - name: モデルの決定
+        id: models
+        env:
+          TRIAGE: ${{ steps.triage.outputs.structured_output }}
+        run: |
+          valid() { case $1 in best|opus|sonnet|haiku) echo "$1" ;; *) echo "$2" ;; esac; }
+          triage=${TRIAGE:-}
+          if [ -z "$triage" ]; then triage="{}"; fi
+          plan=$(jq -r .models.plan <<<"$CFG")
+          impl=$(jq -r .models.implement <<<"$CFG")
+          if [ "$plan" = auto ]; then plan=$(jq -r '.plan_model // ""' <<<"$triage"); fi
+          if [ "$impl" = auto ]; then
+            if [ -n "${TRIAGE:-}" ]; then
+              impl=$(jq -r '.implement_model // ""' <<<"$triage")
+            else
+              # [LGTM] で実装するときは、最後の計画で決めたモデルを使う
+              impl=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
+                --jq '.[] | select(.user.login == "github-actions[bot]") | .body' |
+                grep -oE '<!-- devflow:model implement=[a-z]+ -->' | tail -n1 | sed -E 's/.*=([a-z]+) .*/\1/' || true)
+            fi
+          fi
+          {
+            echo "plan=$(valid "$plan" best)"
+            echo "implement=$(valid "$impl" sonnet)"
+            echo "reason=$(jq -r '.reason // ""' <<<"$triage" | tr '\n' ' ')"
+          } >> "$GITHUB_OUTPUT"
+
       - name: 計画のプロンプト
         id: plan_prompt
         if: needs.route.outputs.issue_action == 'plan'
+        env:
+          PLAN_MODEL: ${{ steps.models.outputs.plan }}
         run: bash "$DEVFLOW_DIR/scripts/prompt.sh" plan
       - name: 計画
         id: plan
@@ -118,17 +165,56 @@ jobs:
           allowed_bots: claude
           prompt: ${{ steps.plan_prompt.outputs.text }}
           claude_args: >-
-            ${{ env.ARGS_PLAN }}
+            --model ${{ steps.models.outputs.plan }}
+            ${{ env.ARGS_PLAN_BASE }}
+            --json-schema '{"type":"object","properties":{"decision":{"type":"string","enum":["implement","wait","stop","escalate"]},"comment":{"type":"string"}},"required":["decision","comment"]}'
+      # 軽いモデルが難しいと判断したら、Opusで計画をやり直す
+      - name: 計画のやり直しのプロンプト
+        id: replan_prompt
+        if: steps.plan.outcome == 'success' && fromJSON(steps.plan.outputs.structured_output).decision == 'escalate'
+        env:
+          PLAN_MODEL: opus
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" plan
+      - name: 計画のやり直し
+        id: replan
+        if: steps.replan_prompt.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        env:
+          DEVFLOW_ISSUE_TOKEN: ${{ secrets.DEVFLOW_ISSUE_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.replan_prompt.outputs.text }}
+          claude_args: >-
+            --model opus
+            ${{ env.ARGS_PLAN_BASE }}
             --json-schema '{"type":"object","properties":{"decision":{"type":"string","enum":["implement","wait","stop"]},"comment":{"type":"string"}},"required":["decision","comment"]}'
       - name: 計画を投稿
         id: decision
         if: needs.route.outputs.issue_action == 'plan'
         env:
-          RESULT: ${{ steps.plan.outputs.structured_output }}
+          RESULT: ${{ steps.replan.outputs.structured_output || steps.plan.outputs.structured_output }}
+          ESCALATED: ${{ steps.replan.outcome == 'success' }}
+          PLAN_MODEL: ${{ steps.replan.outcome == 'success' && 'opus' || steps.models.outputs.plan }}
+          IMPL_MODEL: ${{ steps.models.outputs.implement }}
+          REASON: ${{ steps.models.outputs.reason }}
         run: |
-          jq -r '.comment + "\n\n<!-- devflow:plan -->"' <<<"$RESULT" > "$RUNNER_TEMP/plan.md"
+          decision=$(jq -r .decision <<<"$RESULT")
+          impl=$IMPL_MODEL
+          if [ "$ESCALATED" = true ]; then
+            # やり直したものは、実装も sonnet 以上にする
+            if [ "$impl" = haiku ]; then impl=sonnet; fi
+            REASON="${REASON:+$REASON }計画は難しいと判断され、Opusでやり直した。"
+          fi
+          note="<sub>モデル：計画 \`$PLAN_MODEL\` / 実装 \`$impl\`${REASON:+（$REASON）}</sub>"
+          jq -r --arg note "$note" --arg impl "$impl" \
+            '.comment + "\n\n" + $note + "\n\n<!-- devflow:plan -->\n<!-- devflow:model implement=" + $impl + " -->"' \
+            <<<"$RESULT" > "$RUNNER_TEMP/plan.md"
           gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/plan.md"
-          echo "decision=$(jq -r .decision <<<"$RESULT")" >> "$GITHUB_OUTPUT"
+          {
+            echo "decision=$decision"
+            echo "implement=$impl"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 実装済みか確認
         id: guard
@@ -154,7 +240,9 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
           prompt: ${{ steps.impl_prompt.outputs.text }}
-          claude_args: ${{ env.ARGS_IMPLEMENT }}
+          claude_args: >-
+            --model ${{ steps.decision.outputs.implement || steps.models.outputs.implement }}
+            ${{ env.ARGS_IMPLEMENT_BASE }}
 
   # PR上の作業：CIの自動修正、セルフレビュー、レビュー対応、コメント対応、コンフリクト解消
   pr:

@@ -44,7 +44,7 @@ load_config() {
     {
       default_branch: $branch,
       approvers: [],
-      models: {plan: "best", implement: "sonnet", review: "opus", light: "haiku"},
+      models: {triage: "opus", plan: "auto", implement: "auto", review: "opus", light: "haiku"},
       max_turns: {plan: 30, implement: 100, review: 30, light: 10},
       ci_fix_limit: 3,
       issue_limit: 3
