@@ -4,7 +4,7 @@
 
 ## 手順
 
-1. `gh issue view <Issue番号> --comments` で、Issueと計画のコメント（`## 計画`）を読む。計画とその後のやり取りに従う。
+1. `gh issue view <Issue番号> --json title,body,comments` で、Issueと計画のコメント（`## 計画`）を読む。計画とその後のやり取りに従う。
 2. `git fetch origin` し、`claude/issue-<Issue番号>-` で始まるリモートブランチがあれば、それをcheckoutして続きから作業する（再実行されたとき）。なければデフォルトブランチの最新から `claude/issue-<Issue番号>-<短い説明>` を作る。
 3. 実装し、テストを追加・更新する。`CLAUDE.md` のlint・テストのコマンドを実行して通す。
 4. 意味のある単位でコミットし、pushする。

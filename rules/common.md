@@ -8,7 +8,7 @@
 
 ## 状況の把握
 
-- 毎回新しく起動されるので、記憶はない。Issue・PRの本文とコメントを最初から読んで状況を判断する（`gh issue view <番号> --comments`、`gh pr view <番号> --comments`）。
+- 毎回新しく起動されるので、記憶はない。Issue・PRの本文とコメントを最初から読んで状況を判断する（`gh issue view <番号> --json title,body,comments`、`gh pr view <番号> --json title,body,comments`）。非対話の環境では `--comments` を付けると本文が出ないので、`--json` で読む。
 - 決まったこと、決めた理由は必ずIssueかPRにコメントで残す。次に起動するClaudeはそれしか読めない。
 - 再実行されたときは、途中までpushした内容を読み、続きから作業する。
 

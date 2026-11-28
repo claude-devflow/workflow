@@ -4,7 +4,7 @@
 
 ## 手順
 
-1. `gh issue view <Issue番号> --comments` で、Issueの本文とやり取りをすべて読む。きっかけのコメントIDがあれば、そのコメントへの対応が今回の主題。
+1. `gh issue view <Issue番号> --json title,body,comments` で、Issueの本文とやり取りをすべて読む。きっかけのコメントIDがあれば、そのコメントへの対応が今回の主題。
 2. `gh pr list --state all --search "<Issue番号>"` で、このIssueのPR（`claude/issue-<Issue番号>-` で始まるブランチ）がすでにないか確認する。
 3. 関係するコードと `CLAUDE.md` を読み、実装の方針を決める。
 4. 次の基準で `decision` を決め、Issueに投稿する本文を `comment` に書く。
