@@ -266,10 +266,24 @@ jobs:
           gh pr ready "$PR"
           if [ -n "$REVIEWERS" ]; then gh pr edit "$PR" --add-reviewer "$REVIEWERS"; fi
 
+      # [REVIEW REQUEST] で頼まれたレビュー：Opusがインラインコメントで返す。pushはしない
+      - name: レビューのプロンプト
+        id: request_prompt
+        if: env.ACTION == 'review_request'
+        run: bash "$DEVFLOW_DIR/scripts/prompt.sh" review_request
+      - name: レビュー
+        if: env.ACTION == 'review_request'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: claude
+          prompt: ${{ steps.request_prompt.outputs.text }}
+          claude_args: ${{ env.ARGS_REVIEW }}
+
       # Sonnetによる修正
       - name: 修正のプロンプト
         id: work_prompt
-        if: env.ACTION != 'self_review' || steps.review_result.outputs.has_findings == 'true'
+        if: env.ACTION != 'review_request' && (env.ACTION != 'self_review' || steps.review_result.outputs.has_findings == 'true')
         run: |
           name="$ACTION"
           if [ "$ACTION" = self_review ]; then name=self_review_fix; fi
