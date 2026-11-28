@@ -314,6 +314,34 @@ on_push() {
   fi
 }
 
+# きっかけの対象に 👀 を付けて、受け付けたことを知らせる（失敗しても続ける）
+react() {
+  gh api -X POST "repos/$REPO/$1/reactions" -f content=eyes --silent >/dev/null || log "リアクションに失敗: $1"
+}
+
+# Claudeのジョブを起動すると決めたとき、きっかけのIssue・コメントに付ける（push・workflow_run は対象外）
+acknowledge() {
+  if [ -z "$issue_action" ] && [ -z "$pr_action" ]; then return; fi
+  case "$GITHUB_EVENT_NAME" in
+    issues) react "issues/$(ev .issue.number)" ;;
+    issue_comment) react "issues/comments/$comment_id" ;;
+    pull_request_review)
+      if [ -n "$(ev .review.body)" ]; then
+        # 本文のあるレビューは、レビュー本体にGraphQLで付ける（RESTでは付けられない）
+        # shellcheck disable=SC2016
+        gh api graphql -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
+          -f id="$(ev .review.node_id)" --silent >/dev/null || log "レビューへのリアクションに失敗"
+      else
+        # 本文のないレビューは、全部のインラインコメントに付ける（PR本文には付けない）
+        local cid
+        for cid in $(gh api --paginate "repos/$REPO/pulls/$(ev .pull_request.number)/reviews/$(ev .review.id)/comments" --jq '.[].id' 2>/dev/null); do
+          react "pulls/comments/$cid"
+        done
+      fi
+      ;;
+  esac
+}
+
 load_config
 if [ "$APPROVERS" = '[]' ]; then
   log "承認者が決まらない。organizationのリポジトリでは .github/devflow.yml の approvers を指定する"
@@ -330,4 +358,5 @@ case "$GITHUB_EVENT_NAME" in
   push) on_push ;;
   *) log "対象外のイベント: $GITHUB_EVENT_NAME" ;;
 esac
+acknowledge
 emit
