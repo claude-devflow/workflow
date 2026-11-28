@@ -120,7 +120,7 @@ jobs:
           prompt: ${{ steps.triage_prompt.outputs.text }}
           claude_args: >-
             ${{ env.ARGS_TRIAGE }}
-            --json-schema '{"type":"object","properties":{"plan_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"implement_model":{"type":"string","enum":["opus","sonnet","haiku"]},"reason":{"type":"string"}},"required":["plan_model","implement_model","reason"]}'
+            --json-schema '{"type":"object","properties":{"plan_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"implement_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"reason":{"type":"string"}},"required":["plan_model","implement_model","reason"]}'
       - name: モデルの決定
         id: models
         env:
@@ -135,12 +135,19 @@ jobs:
           if [ "$impl" = auto ]; then
             if [ -n "${TRIAGE:-}" ]; then
               impl=$(jq -r '.implement_model // ""' <<<"$triage")
+              # best で実装するのは、計画も best のときだけ
+              if [ "$impl" = best ] && [ "$plan" != best ]; then impl=opus; fi
             else
               # [LGTM] で実装するときは、最後の計画で決めたモデルを使う
               impl=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
                 --jq '.[] | select(.user.login == "github-actions[bot]") | .body' |
                 grep -oE '<!-- devflow:model implement=[a-z]+ -->' | tail -n1 | sed -E 's/.*=([a-z]+) .*/\1/' || true)
             fi
+            # 判定で選んだ実装のモデルは models.implement_max までに抑える
+            rank() { case $1 in haiku) echo 1 ;; sonnet) echo 2 ;; opus) echo 3 ;; best) echo 4 ;; *) echo 0 ;; esac; }
+            max=$(valid "$(jq -r '.models.implement_max // ""' <<<"$CFG")" opus)
+            impl=$(valid "$impl" sonnet)
+            if [ "$(rank "$impl")" -gt "$(rank "$max")" ]; then impl=$max; fi
           fi
           {
             echo "plan=$(valid "$plan" best)"
