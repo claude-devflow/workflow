@@ -25,6 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 | Issueの作成 | 承認者かClaudeが起票。依存Issueが開いていない | 計画（`best`）→ 承認者のIssueか簡単なものは実装（`sonnet`） |
 | Issueへのコメント | 承認者の新規コメント。`[MEMO]` は無視 | `[LGTM]` なら実装、それ以外は計画のやり直し・返信 |
 | PRへのコメント | 承認者、`claude/` のブランチ。`[LGTM]`・`[MEMO]`・`[REVIEW REQUEST]` は無視 | コメント対応（`sonnet`） |
+| PRへのコメント（人間のPR） | 承認者、`claude/` 以外のブランチ、`@claude` のメンションあり | 返信（`sonnet`）。修正は `suggestion` で示すだけで、pushはしない |
 | PRへの `[REVIEW REQUEST]` | 承認者。ブランチは問わない（人間のPRにも、ClaudeのPRにも使える） | レビュー（`opus`）。インラインコメントで返し、狭い修正は `suggestion` で提案する。pushはしない |
 | レビューの送信 | 承認者、`claude/` のブランチ | レビュー対応（`sonnet`）。スレッドごとに返信し、対応済みだけ解決 |
 | CIの完了（失敗） | `claude/` のブランチ | 1回目は失敗したジョブを再実行（flaky判定）。また落ちたら要約（`haiku`）→ 修正（`sonnet`）。承認者が最後に発言してから3回まで |

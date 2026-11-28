@@ -69,6 +69,11 @@ comment_kind() {
     elif startswith("[REVIEW REQUEST]") then "review" else "normal" end' "$EVENT"
 }
 
+# 本文に @claude のメンションがあるか
+mentions_claude() {
+  jq -e "$1"' // "" | test("(^|[^A-Za-z0-9_/-])@claude($|[^A-Za-z0-9_-])"; "i")' "$EVENT" >/dev/null
+}
+
 # Issueに対応する、開いている・マージ済みのClaudeのPR
 active_pr_for_issue() {
   gh pr list -R "$REPO" --state all --limit 100 --json number,headRefName,state \
@@ -136,8 +141,14 @@ on_issue_comment() {
       pr_action=review_request
     else
       head=$(gh pr view "$n" -R "$REPO" --json headRefName -q .headRefName)
-      if [[ $head != claude/* ]]; then return; fi
-      pr_action=pr_comment
+      if [[ $head == claude/* ]]; then
+        pr_action=pr_comment
+      elif mentions_claude .comment.body; then
+        # 人間のPRは、@claude と話しかけられたときだけ返信する（pushはしない）
+        pr_action=pr_reply
+      else
+        return
+      fi
     fi
     prs=$(to_json "$n")
     return
