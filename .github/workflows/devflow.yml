@@ -108,7 +108,10 @@ jobs:
         id: triage_prompt
         if: needs.route.outputs.issue_action == 'plan' && (fromJSON(needs.route.outputs.config).models.plan == 'auto' || fromJSON(needs.route.outputs.config).models.implement == 'auto')
         run: |
-          gh issue view "$ISSUE" --comments | head -c 30000 > "$RUNNER_TEMP/issue.md"
+          # 非対話では --comments が本文を出さないので、JSONから組み立てる
+          gh issue view "$ISSUE" --json title,body,comments \
+            --jq '"# " + .title + "\n\n" + .body + ([.comments[] | "\n\n---\n" + .author.login + ":\n" + .body] | join(""))' |
+            head -c 30000 > "$RUNNER_TEMP/issue.md"
           ISSUE_DUMP="$RUNNER_TEMP/issue.md" bash "$DEVFLOW_DIR/scripts/prompt.sh" triage
       - name: モデルの判定
         id: triage

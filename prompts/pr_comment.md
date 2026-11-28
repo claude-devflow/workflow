@@ -2,7 +2,7 @@
 
 あなたの担当は、上記のPRに承認者が書いたコメント（「きっかけのコメントID」）に対応すること。
 
-1. `gh api repos/<リポジトリ>/issues/comments/<コメントID>` でコメントを読み、`gh pr view <PR番号> --comments` で経緯を確認する。
+1. `gh api repos/<リポジトリ>/issues/comments/<コメントID>` でコメントを読み、`gh pr view <PR番号> --json title,body,comments` で経緯を確認する。
 2. 修正の依頼なら直し、`CLAUDE.md` のlint・テストのコマンドを通してから、コミットしてpushする。
 3. コードを直した場合だけ、共通ルールに従ってPR本文を更新する（質問に答えるだけなら更新しない）。
 4. 質問なら答える。

@@ -4,7 +4,7 @@
 
 **コードは変更しない。** ファイルの編集、commit、pushをしない。このブランチは人間のもので、直すかどうかは人間が決める。
 
-1. `gh api repos/<リポジトリ>/issues/comments/<コメントID> --jq .body` でコメントを読み、`gh pr view <PR番号> --comments` で経緯を確認する。
+1. `gh api repos/<リポジトリ>/issues/comments/<コメントID> --jq .body` でコメントを読み、`gh pr view <PR番号> --json title,body,comments` で経緯を確認する。
 2. 必要に応じて `gh pr diff <PR番号>` や周辺のコードを読み、質問に答える・調べる。
 3. PRにコメントで返信する（`gh pr comment <PR番号> --body-file <ファイル>`）。
 4. 修正を頼まれたときは、自分で直さずに直し方を示す。範囲が狭く直し方が明確なら、該当する行に `suggestion` 付きのレビューコメントを付ける（承認者がUIからコミットできる）。
