@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 | PRへのコメント（人間のPR） | 承認者、`claude/` 以外のブランチ、`@claude` のメンションあり | 返信（`sonnet`）。修正は `suggestion` で示すだけで、pushはしない |
 | PRへの `[REVIEW REQUEST]` | 承認者。ブランチは問わない（人間のPRにも、ClaudeのPRにも使える） | レビュー（`opus`）。インラインコメントで返し、狭い修正は `suggestion` で提案する。pushはしない |
 | レビューの送信 | 承認者、`claude/` のブランチ | レビュー対応（`sonnet`）。スレッドごとに返信し、対応済みだけ解決 |
+| レビューの送信（人間のPR） | 承認者、`claude/` 以外のブランチ、Claudeが始めたスレッドへの返信を含む | 返信されたスレッドの修正（`sonnet`）。そのPRのブランチに積んでpushする（rebase・force pushなし）。承認者が始めたスレッドには触れない |
 | CIの完了（失敗） | `claude/` のブランチ | 1回目は失敗したジョブを再実行（flaky判定）。また落ちたら要約（`haiku`）→ 修正（`sonnet`）。承認者が最後に発言してから3回まで |
 | CIの完了（成功） | Draft PR | セルフレビュー前ならセルフレビュー（`opus`）、指摘があれば修正（`sonnet`）。セルフレビュー済みならReady化してレビュアーを指定 |
 | CIの再実行での成功 | | flaky testの分析（`haiku`）と起票・発生回数の追記 |

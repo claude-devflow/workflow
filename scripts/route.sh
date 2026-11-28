@@ -165,15 +165,32 @@ on_issue_comment() {
   issues=$(to_json "$n")
 }
 
+# レビューに、Claudeが始めたスレッドへの返信が含まれるか
+replies_to_claude() {
+  local id
+  for id in $(gh api "repos/$REPO/pulls/$1/reviews/$2/comments" --jq '.[] | .in_reply_to_id // empty'); do
+    if [ "$(gh api "repos/$REPO/pulls/comments/$id" --jq .user.login)" = "$BOT" ]; then return 0; fi
+  done
+  return 1
+}
+
 on_review() {
   local n reviewer head kind count
   n=$(ev .pull_request.number)
   reviewer=$(ev .review.user.login)
   head=$(ev .pull_request.head.ref)
-  if ! is_approver "$reviewer" || [[ $head != claude/* ]] || [ "$(ev .pull_request.state)" != open ]; then return; fi
+  if ! is_approver "$reviewer" || [ "$(ev .pull_request.state)" != open ]; then return; fi
   kind=$(comment_kind .review.body)
   if [ "$kind" = memo ]; then return; fi
   review_id=$(ev .review.id)
+  # 人間のPRでは、Claudeが始めたスレッドへの返信にだけ対応する（そのPRのブランチにpushする）
+  if [[ $head != claude/* ]]; then
+    if replies_to_claude "$n" "$review_id"; then
+      pr_action=thread_fix
+      prs=$(to_json "$n")
+    fi
+    return
+  fi
   # 本文もインラインコメントもない承認には何もしない
   if [ "$(ev .review.state)" = approved ] && [ -z "$(ev .review.body)" ]; then
     count=$(gh api "repos/$REPO/pulls/$n/reviews/$review_id/comments" --jq length)
