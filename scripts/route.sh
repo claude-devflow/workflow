@@ -326,10 +326,18 @@ acknowledge() {
     issues) react "issues/$(ev .issue.number)" ;;
     issue_comment) react "issues/comments/$comment_id" ;;
     pull_request_review)
-      # レビュー本体（インラインコメントの親）にはREST APIで付けられないので、GraphQLで付ける
-      # shellcheck disable=SC2016
-      gh api graphql -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
-        -f id="$(ev .review.node_id)" --silent >/dev/null || log "レビューへのリアクションに失敗"
+      if [ -n "$(ev .review.body)" ]; then
+        # 本文のあるレビューは、レビュー本体にGraphQLで付ける（RESTでは付けられない）
+        # shellcheck disable=SC2016
+        gh api graphql -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
+          -f id="$(ev .review.node_id)" --silent >/dev/null || log "レビューへのリアクションに失敗"
+      else
+        # 本文のないレビューは、全部のインラインコメントに付ける（PR本文には付けない）
+        local cid
+        for cid in $(gh api --paginate "repos/$REPO/pulls/$(ev .pull_request.number)/reviews/$(ev .review.id)/comments" --jq '.[].id' 2>/dev/null); do
+          react "pulls/comments/$cid"
+        done
+      fi
       ;;
   esac
 }
