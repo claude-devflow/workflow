@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/claude-devflow/workflow/main/setup.
 | --- | --- |
 | ブランチ `claude/issue-<N>-...` | Issue #N の作業ブランチ。PRとIssueの対応づけに使う |
 | `<!-- devflow:plan -->` | 計画のコメント |
-| `<!-- devflow:model implement=<モデル> -->` | 計画で決めた実装のモデル。`[LGTM]` で実装するときに使う |
+| `<!-- devflow:model implement=<モデル> review=<モデル> -->` | 計画で決めた実装とセルフレビューのモデル。`[LGTM]` での実装と、セルフレビューで使う |
 | `<!-- devflow:self-review -->` | セルフレビュー済み（1回だけ行う） |
 | `<!-- devflow:ci-fix -->` | CIの自動修正の回数 |
 | `<!-- devflow:ci-limit -->` | 自動修正の上限に達した通知 |

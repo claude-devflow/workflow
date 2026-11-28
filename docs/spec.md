@@ -122,7 +122,7 @@ Claudeが起票したIssueは、簡単なものはそのまま実装し、それ
 
 ## モデルの割り当て
 
-計画と実装のモデルは、Issueの内容に応じて選ぶ（`auto`）。計画の前に、OpusがIssueの本文とコメントだけを読み（ツールなし、コードは読まない）、計画を `best` / `opus` / `sonnet` / `haiku`、実装を `best` / `opus` / `sonnet` / `haiku` から選ぶ。実装の `best` は、計画も `best` で難しいロジックが中心のときだけで、設定の `models.implement_max`（既定は `opus`）を超えるモデルは選ばれない。fableで実装させたいアプリだけ `implement_max: best` にする。共通ルールの「簡単ではない作業」に当たりそうなものは、計画を `opus` 以上、実装を `sonnet` 以上にする。セルフレビューはOpus、軽い作業はHaikuに割り当てる。実装とセルフレビューでモデルを分け、思い込みに引きずられないチェックにする。
+計画と実装のモデルは、Issueの内容に応じて選ぶ（`auto`）。計画の前に、OpusがIssueの本文とコメントだけを読み（ツールなし、コードは読まない）、計画を `best` / `opus` / `sonnet` / `haiku`、実装を `best` / `opus` / `sonnet` / `haiku` から選ぶ。実装の `best` は、計画も `best` で難しいロジックが中心のときだけで、設定の `models.implement_max`（既定は `opus`）を超えるモデルは選ばれない。fableで実装させたいアプリだけ `implement_max: best` にする。共通ルールの「簡単ではない作業」に当たりそうなものは、計画を `opus` 以上、実装を `sonnet` 以上にする。セルフレビューのモデルも判定で選ぶ（`opus` / `sonnet` / `haiku`、既定は `opus`）。ただし実装のモデルより下にはしない。`[REVIEW REQUEST]` で頼まれたレビューはOpus、軽い作業はHaikuに割り当てる。実装とセルフレビューでモデルを分け、思い込みに引きずられないチェックにする。
 
 `haiku` か `sonnet` で計画していて、コードを読んだ結果、想定より難しいとわかったときは、計画が `escalate` を返し、Opusが計画をやり直す（実装も `sonnet` 以上にする）。選んだモデルと理由は計画のコメントの末尾に書き、`[LGTM]` で実装するときもそのモデルを使う。設定ファイルで `models.plan` / `models.implement` を固定のモデルにすれば、判定をせずにそのモデルを使う。
 
@@ -132,7 +132,8 @@ Claudeが起票したIssueは、簡単なものはそのまま実装し、それ
 | 計画・設計・Issueの分割 | 判定で選ぶ（Fable・Opus・Sonnet・Haiku） | `auto` |
 | Issueからの実装 | 判定で選ぶ（Opus・Sonnet・Haiku。許可すればFable） | `auto`（上限は `implement_max`） |
 | CIの自動修正・レビュー対応・コンフリクト解消 | Sonnet（`models.implement` が `auto` のとき） | `sonnet` |
-| セルフレビュー・依頼されたレビュー | Opus | `opus` |
+| セルフレビュー | 判定で選ぶ（Opus・Sonnet・Haiku。実装のモデル以上） | `auto`（`models.self_review`） |
+| 依頼されたレビュー | Opus | `opus`（`models.review`） |
 | 軽い作業（CIログの要約、flaky testの原因分析など） | Haiku | `haiku` |
 
 **Fableの注意点**：プランによっては、Fableの利用がプランの枠ではなく追加の利用クレジットから課金される。GitHub Actionsのような非対話モードでは確認なしで課金されるため、導入前にClaude Codeの `/model` でFableの行に「Requires usage credits」が出ていないか確認する。出ていたら、設定ファイルで `models.plan: opus` にする（判定は計画のモデルを選ばなくなり、実装のモデルだけを選ぶ）。
