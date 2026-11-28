@@ -5,7 +5,8 @@ set -euo pipefail
 
 : "${CFG:?CFG が必要}"
 dir="$RUNNER_TEMP/devflow"
-tools='Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task'
+# mcp__github_ci__* は additional_permissions（actions: read）で使えるCIの結果・ログの取得
+tools='Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details,mcp__github_ci__download_job_log'
 
 # auto のときに判定がなければ使うモデル
 fallback() { case $1 in plan) echo best ;; *) echo sonnet ;; esac; }

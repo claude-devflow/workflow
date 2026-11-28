@@ -118,6 +118,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.triage_prompt.outputs.text }}
           claude_args: >-
             ${{ env.ARGS_TRIAGE }}
@@ -171,6 +173,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.plan_prompt.outputs.text }}
           claude_args: >-
             --model ${{ steps.models.outputs.plan }}
@@ -192,6 +196,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.replan_prompt.outputs.text }}
           claude_args: >-
             --model opus
@@ -248,6 +254,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.impl_prompt.outputs.text }}
           claude_args: >-
             --model ${{ steps.decision.outputs.implement || steps.models.outputs.implement }}
@@ -320,6 +328,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.summary_prompt.outputs.text }}
           claude_args: >-
             ${{ env.ARGS_LIGHT }}
@@ -344,6 +354,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.review_prompt.outputs.text }}
           claude_args: >-
             ${{ env.ARGS_REVIEW }}
@@ -374,6 +386,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.request_prompt.outputs.text }}
           claude_args: ${{ env.ARGS_REVIEW }}
 
@@ -393,6 +407,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.work_prompt.outputs.text }}
           claude_args: ${{ env.ARGS_IMPLEMENT }}
 
@@ -441,6 +457,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_bots: claude
+          additional_permissions: |
+            actions: read
           prompt: ${{ steps.flaky_prompt.outputs.text }}
           claude_args: ${{ env.ARGS_LIGHT }}
 
