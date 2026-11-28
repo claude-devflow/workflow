@@ -322,19 +322,14 @@ react() {
 # Claudeのジョブを起動すると決めたとき、きっかけのIssue・コメントに付ける（push・workflow_run は対象外）
 acknowledge() {
   if [ -z "$issue_action" ] && [ -z "$pr_action" ]; then return; fi
-  local id
   case "$GITHUB_EVENT_NAME" in
     issues) react "issues/$(ev .issue.number)" ;;
     issue_comment) react "issues/comments/$comment_id" ;;
     pull_request_review)
-      # レビュー自体にはリアクションを付けられないので、インラインコメントに付ける
-      local ids
-      ids=$(gh api "repos/$REPO/pulls/$(ev .pull_request.number)/reviews/$review_id/comments" --jq '.[].id' || true)
-      if [ -z "$ids" ]; then
-        react "issues/$(ev .pull_request.number)"
-      else
-        for id in $ids; do react "pulls/comments/$id"; done
-      fi
+      # レビュー本体（インラインコメントの親）にはREST APIで付けられないので、GraphQLで付ける
+      # shellcheck disable=SC2016
+      gh api graphql -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
+        -f id="$(ev .review.node_id)" --silent >/dev/null || log "レビューへのリアクションに失敗"
       ;;
   esac
 }
