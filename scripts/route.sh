@@ -314,6 +314,31 @@ on_push() {
   fi
 }
 
+# きっかけの対象に 👀 を付けて、受け付けたことを知らせる（失敗しても続ける）
+react() {
+  gh api -X POST "repos/$REPO/$1/reactions" -f content=eyes --silent >/dev/null || log "リアクションに失敗: $1"
+}
+
+# Claudeのジョブを起動すると決めたとき、きっかけのIssue・コメントに付ける（push・workflow_run は対象外）
+acknowledge() {
+  if [ -z "$issue_action" ] && [ -z "$pr_action" ]; then return; fi
+  local id
+  case "$GITHUB_EVENT_NAME" in
+    issues) react "issues/$(ev .issue.number)" ;;
+    issue_comment) react "issues/comments/$comment_id" ;;
+    pull_request_review)
+      # レビュー自体にはリアクションを付けられないので、インラインコメントに付ける
+      local ids
+      ids=$(gh api "repos/$REPO/pulls/$(ev .pull_request.number)/reviews/$review_id/comments" --jq '.[].id' || true)
+      if [ -z "$ids" ]; then
+        react "issues/$(ev .pull_request.number)"
+      else
+        for id in $ids; do react "pulls/comments/$id"; done
+      fi
+      ;;
+  esac
+}
+
 load_config
 if [ "$APPROVERS" = '[]' ]; then
   log "承認者が決まらない。organizationのリポジトリでは .github/devflow.yml の approvers を指定する"
@@ -330,4 +355,5 @@ case "$GITHUB_EVENT_NAME" in
   push) on_push ;;
   *) log "対象外のイベント: $GITHUB_EVENT_NAME" ;;
 esac
+acknowledge
 emit
