@@ -13,8 +13,9 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  push:
-    branches: [master, main]
+  # デフォルトブランチへのマージ（push は claude-code-action が対応していない）
+  pull_request:
+    types: [closed]
 
 permissions:
   contents: write

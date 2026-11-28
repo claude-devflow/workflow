@@ -286,17 +286,17 @@ on_workflow_run() {
   esac
 }
 
-on_push() {
-  local sha p c num body64 body m
+# デフォルトブランチへのマージ（pull_request の closed）
+# push では claude-code-action が動かない（Unsupported event type: push）ため、PRのマージで判定する
+on_pr_merged() {
+  local p c num body64 body m
   local closed=() targets=() conflicts=()
-  if [ "$(ev .ref)" != "refs/heads/$(jq -r .default_branch <<<"$CONFIG")" ]; then return; fi
-  sha=$(ev .after)
+  if [ "$(ev .pull_request.merged)" != true ]; then return; fi
+  if [ "$(ev .pull_request.base.ref)" != "$(jq -r .default_branch <<<"$CONFIG")" ]; then return; fi
 
   # マージされたPRが閉じたIssueを待っていたサブIssueを起動する
-  for p in $(gh api "repos/$REPO/commits/$sha/pulls" --jq '.[] | select(.merged_at != null) | .number'); do
-    for c in $(gh pr view "$p" -R "$REPO" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); do
-      closed+=("$c")
-    done
+  for c in $(gh pr view "$(ev .pull_request.number)" -R "$REPO" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'); do
+    closed+=("$c")
   done
   if [ ${#closed[@]} -gt 0 ]; then
     while IFS=$'\t' read -r num body64; do
@@ -336,7 +336,7 @@ react() {
   gh api -X POST "repos/$REPO/$1/reactions" -f content=eyes --silent >/dev/null || log "リアクションに失敗: $1"
 }
 
-# Claudeのジョブを起動すると決めたとき、きっかけのIssue・コメントに付ける（push・workflow_run は対象外）
+# Claudeのジョブを起動すると決めたとき、きっかけのIssue・コメントに付ける（pull_request・workflow_run は対象外）
 acknowledge() {
   if [ -z "$issue_action" ] && [ -z "$pr_action" ]; then return; fi
   case "$GITHUB_EVENT_NAME" in
@@ -372,7 +372,9 @@ case "$GITHUB_EVENT_NAME" in
   issue_comment) if [ "$action" = created ]; then on_issue_comment; fi ;;
   pull_request_review) if [ "$action" = submitted ]; then on_review; fi ;;
   workflow_run) if [ "$action" = completed ]; then on_workflow_run; fi ;;
-  push) on_push ;;
+  pull_request) if [ "$action" = closed ]; then on_pr_merged; fi ;;
+  # 古い呼び出し用ファイル。claude-code-action が push に対応していないので何もしない
+  push) log "push は非対応。setup.sh install で呼び出し用ファイルを更新する（pull_request の closed を受け取る）" ;;
   *) log "対象外のイベント: $GITHUB_EVENT_NAME" ;;
 esac
 acknowledge
