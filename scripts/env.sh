@@ -20,7 +20,8 @@ fallback() { case $1 in plan) echo best ;; *) echo sonnet ;; esac; }
     echo "ARGS_${stage^^}_BASE=$base"
     echo "ARGS_${stage^^}=--model $model $base"
   done
-  echo "ARGS_TRIAGE=--model $(jq -r .models.triage <<<"$CFG") --max-turns 3"
+  # 判定はIssueの本文だけで行う。ファイルを読みにいかないようにツールを外す
+  echo "ARGS_TRIAGE=--model $(jq -r .models.triage <<<"$CFG") --max-turns 3 --disallowedTools $tools"
   echo "DEVFLOW_DIR=$dir"
   echo "DEFAULT_BRANCH=$(jq -r .default_branch <<<"$CFG")"
   echo "DEVFLOW_ISSUE_LIMIT=$(jq -r .issue_limit <<<"$CFG")"
