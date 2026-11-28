@@ -103,10 +103,10 @@ jobs:
           mv .devflow-src "$RUNNER_TEMP/devflow"
           bash "$RUNNER_TEMP/devflow/scripts/env.sh"
 
-      # モデルの判定：models.plan / models.implement が auto のとき、OpusがIssueだけを読んで決める
+      # モデルの判定：models.plan / implement / self_review が auto のとき、OpusがIssueだけを読んで決める
       - name: 判定のプロンプト
         id: triage_prompt
-        if: needs.route.outputs.issue_action == 'plan' && (fromJSON(needs.route.outputs.config).models.plan == 'auto' || fromJSON(needs.route.outputs.config).models.implement == 'auto')
+        if: needs.route.outputs.issue_action == 'plan' && (fromJSON(needs.route.outputs.config).models.plan == 'auto' || fromJSON(needs.route.outputs.config).models.implement == 'auto' || fromJSON(needs.route.outputs.config).models.self_review == 'auto')
         run: |
           # 非対話では --comments が本文を出さないので、JSONから組み立てる
           gh issue view "$ISSUE" --json title,body,comments \
@@ -126,7 +126,7 @@ jobs:
           prompt: ${{ steps.triage_prompt.outputs.text }}
           claude_args: >-
             ${{ env.ARGS_TRIAGE }}
-            --json-schema '{"type":"object","properties":{"plan_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"implement_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"reason":{"type":"string"}},"required":["plan_model","implement_model","reason"]}'
+            --json-schema '{"type":"object","properties":{"plan_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"implement_model":{"type":"string","enum":["best","opus","sonnet","haiku"]},"review_model":{"type":"string","enum":["opus","sonnet","haiku"]},"reason":{"type":"string"}},"required":["plan_model","implement_model","review_model","reason"]}'
       - name: モデルの決定
         id: models
         env:
@@ -147,7 +147,7 @@ jobs:
               # [LGTM] で実装するときは、最後の計画で決めたモデルを使う
               impl=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" \
                 --jq '.[] | select(.user.login == "github-actions[bot]") | .body' |
-                grep -oE '<!-- devflow:model implement=[a-z]+ -->' | tail -n1 | sed -E 's/.*=([a-z]+) .*/\1/' || true)
+                grep -oE '<!-- devflow:model implement=[a-z]+' | tail -n1 | sed -E 's/.*=//' || true)
             fi
             # 判定で選んだ実装のモデルは models.implement_max までに抑える
             rank() { case $1 in haiku) echo 1 ;; sonnet) echo 2 ;; opus) echo 3 ;; best) echo 4 ;; *) echo 0 ;; esac; }
@@ -158,6 +158,7 @@ jobs:
           {
             echo "plan=$plan"
             echo "implement=$impl"
+            echo "review=$(valid "$(jq -r '.review_model // ""' <<<"$triage")" opus)"
             echo "reason=$(jq -r '.reason // ""' <<<"$triage" | tr '\n' ' ')"
           } >> "$GITHUB_OUTPUT"
 
@@ -215,6 +216,8 @@ jobs:
           PLAN_MODEL: ${{ steps.replan.outcome == 'success' && 'opus' || steps.models.outputs.plan }}
           IMPL_MODEL: ${{ steps.models.outputs.implement }}
           IMPL_CFG: ${{ fromJSON(needs.route.outputs.config).models.implement }}
+          REVIEW_MODEL: ${{ steps.models.outputs.review }}
+          REVIEW_CFG: ${{ fromJSON(needs.route.outputs.config).models.self_review }}
           REASON: ${{ steps.models.outputs.reason }}
         run: |
           decision=$(jq -r .decision <<<"$RESULT")
@@ -224,9 +227,18 @@ jobs:
             if [ "$IMPL_CFG" = auto ] && [ "$impl" = haiku ]; then impl=sonnet; fi
             REASON="${REASON:+$REASON }計画は難しいと判断され、Opusでやり直した。"
           fi
-          note="<sub>モデル：計画 \`$PLAN_MODEL\` / 実装 \`$impl\`${REASON:+（$REASON）}</sub>"
-          jq -r --arg note "$note" --arg impl "$impl" \
-            '.comment + "\n\n" + $note + "\n\n<!-- devflow:plan -->\n<!-- devflow:model implement=" + $impl + " -->"' \
+          # セルフレビューは実装のモデル以上にする（best の実装は opus でレビュー）
+          rank() { case $1 in haiku) echo 1 ;; sonnet) echo 2 ;; opus | best) echo 3 ;; *) echo 0 ;; esac; }
+          review=$REVIEW_CFG
+          if [ "$review" = auto ]; then
+            review=$REVIEW_MODEL
+            if [ "$(rank "$review")" -lt "$(rank "$impl")" ]; then
+              case $impl in best) review=opus ;; *) review=$impl ;; esac
+            fi
+          fi
+          note="<sub>モデル：計画 \`$PLAN_MODEL\` / 実装 \`$impl\` / セルフレビュー \`$review\`${REASON:+（$REASON）}</sub>"
+          jq -r --arg note "$note" --arg impl "$impl" --arg review "$review" \
+            '.comment + "\n\n" + $note + "\n\n<!-- devflow:plan -->\n<!-- devflow:model implement=" + $impl + " review=" + $review + " -->"' \
             <<<"$RESULT" > "$RUNNER_TEMP/plan.md"
           gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/plan.md"
           {
@@ -345,7 +357,25 @@ jobs:
           printf '%s' "$RESULT" | jq -r '.summary // ""' > "$RUNNER_TEMP/ci-summary.md" || true
           echo "CI_SUMMARY_FILE=$RUNNER_TEMP/ci-summary.md" >> "$GITHUB_ENV"
 
-      # セルフレビュー：Opusが1回だけレビューする
+      # セルフレビュー：計画で決めたモデル（既定は Opus）が1回だけレビューする
+      - name: セルフレビューのモデル
+        id: review_model
+        if: env.ACTION == 'self_review'
+        env:
+          HEAD_REF: ${{ steps.head.outputs.ref }}
+        run: |
+          model=$(jq -r '.models.self_review // "auto"' <<<"$CFG")
+          if [ "$model" = auto ]; then
+            model=''
+            # ブランチ名のIssueの、最後の計画に残したモデル
+            if [[ $HEAD_REF =~ ^claude/issue-([0-9]+)- ]]; then
+              model=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/${BASH_REMATCH[1]}/comments" \
+                --jq '.[] | select(.user.login == "github-actions[bot]") | .body' |
+                grep -oE '<!-- devflow:model implement=[a-z]+ review=[a-z]+' | tail -n1 | sed -E 's/.*review=//' || true)
+            fi
+            case $model in opus | sonnet | haiku) ;; *) model=opus ;; esac
+          fi
+          echo "model=$model" >> "$GITHUB_OUTPUT"
       - name: セルフレビューのプロンプト
         id: review_prompt
         if: env.ACTION == 'self_review'
@@ -361,15 +391,17 @@ jobs:
             actions: read
           prompt: ${{ steps.review_prompt.outputs.text }}
           claude_args: >-
-            ${{ env.ARGS_REVIEW }}
+            --model ${{ steps.review_model.outputs.model }}
+            ${{ env.ARGS_REVIEW_BASE }}
             --json-schema '{"type":"object","properties":{"has_findings":{"type":"boolean"},"review":{"type":"string"}},"required":["has_findings","review"]}'
       - name: セルフレビューを投稿
         id: review_result
         if: env.ACTION == 'self_review'
         env:
           RESULT: ${{ steps.review.outputs.structured_output }}
+          MODEL: ${{ steps.review_model.outputs.model }}
         run: |
-          jq -r '"## セルフレビュー（Opus）\n\n" + .review + "\n\n<!-- devflow:self-review -->"' <<<"$RESULT" > "$RUNNER_TEMP/review.md"
+          jq -r --arg m "$MODEL" '"## セルフレビュー（" + $m + "）\n\n" + .review + "\n\n<!-- devflow:self-review -->"' <<<"$RESULT" > "$RUNNER_TEMP/review.md"
           gh pr comment "$PR" --body-file "$RUNNER_TEMP/review.md"
           echo "has_findings=$(jq -r .has_findings <<<"$RESULT")" >> "$GITHUB_OUTPUT"
       - name: レビュー可能にする
